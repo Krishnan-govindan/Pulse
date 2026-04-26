@@ -160,6 +160,22 @@ st.markdown(
     }}
     .col-header.escalate {{ color: var(--accent); }}
     .col-header.engage   {{ color: var(--green); }}
+
+    /* brand filter tiles — overrides default st.button style */
+    div[data-testid="stHorizontalBlock"] .brand-tile-btn .stButton>button {{
+        background: var(--panel); color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 12px; padding: 0.85rem 1rem;
+        font-weight: 600; text-align: left; line-height: 1.3;
+        white-space: pre-line; min-height: 84px;
+        transition: transform 0.08s, border-color 0.15s, background 0.15s;
+    }}
+    div[data-testid="stHorizontalBlock"] .brand-tile-btn .stButton>button:hover {{
+        transform: translateY(-1px); background: #1a1a22;
+    }}
+    .brand-tile-btn.active .stButton>button {{
+        box-shadow: 0 0 0 2px currentColor inset !important;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -491,43 +507,79 @@ def fetch_reddit_mentions_multi(active_brands: list[str]) -> list[Mention]:
 # Demo mock data
 # ────────────────────────────────────────────────────────────────────────────
 def demo_mentions(active_brands: list[str] | None = None) -> list[Mention]:
-    """Mock mentions across all four hackathon brands. Filtered to active_brands."""
+    """Mock mentions across all four hackathon brands and three sources.
+    `subreddit` field doubles as channel context across sources:
+      reddit    → subreddit name
+      x         → list/hashtag context
+      instagram → handle of post owner being commented on
+    """
     now = datetime.now(timezone.utc)
+    # (id, source, brand, author, channel, text)
     raw = [
-        # FluxA — engage, engage, escalate, ignore
-        ("dm_f1", "FluxA", "saas_builder_22", "SaaS",
+        # ── Reddit ───────────────────────────────────────────────
+        ("dm_f1", "reddit", "FluxA", "saas_builder_22", "SaaS",
          "Built an MCP server that does competitor scraping, want to charge $0.005/call. Stripe usage-based billing is overkill. Anything purpose-built for MCP tools?"),
-        ("dm_f2", "FluxA", "agentdev_lin", "LocalLLaMA",
+        ("dm_f2", "reddit", "FluxA", "agentdev_lin", "LocalLLaMA",
          "Has anyone tried FluxA for paying out to agent wallets in USDC? Need something that doesn't require KYC for every $0.10 micro-transaction."),
-        ("dm_f3", "FluxA", "burned_user_91", "startups",
+        ("dm_f3", "reddit", "FluxA", "burned_user_91", "startups",
          "@FluxA your AEP2 settlement bricked our prod for 25 min last night and we lost ~$800 in agent payouts. Ticket #4471 — ZERO response."),
-        ("dm_f4", "FluxA", "shop_class_dad", "all",
+        ("dm_f4", "reddit", "FluxA", "shop_class_dad", "all",
          "Picked up a flux core welder for the garage, anyone running 0.030 wire?"),
-        # TokenRouter — engage, engage, escalate
-        ("dm_t1", "TokenRouter", "infra_pat", "MachineLearning",
+        ("dm_t1", "reddit", "TokenRouter", "infra_pat", "MachineLearning",
          "Tired of writing my own model fallback layer when Anthropic 503s. Anyone using TokenRouter or OpenRouter for prod inference? Looking for p50/p99 numbers."),
-        ("dm_t2", "TokenRouter", "indie_lab", "LocalLLaMA",
+        ("dm_t2", "reddit", "TokenRouter", "indie_lab", "LocalLLaMA",
          "Is there a router that auto-picks gpt-4o-mini vs sonnet based on task difficulty? Don't want to write a classifier."),
-        ("dm_t3", "TokenRouter", "frustrated_dev", "SaaS",
+        ("dm_t3", "reddit", "TokenRouter", "frustrated_dev", "SaaS",
          "TokenRouter just billed me 3x what their dashboard showed for last week. Support hasn't replied in 4 days. Anyone else seeing this?"),
-        # AgentHansa — engage, escalate
-        ("dm_a1", "AgentHansa", "agent_builder_x", "startups",
+        ("dm_a1", "reddit", "AgentHansa", "agent_builder_x", "startups",
          "Built a B2B research agent. Where do people actually list these for real paid quests? Heard about AgentHansa, anyone using it?"),
-        ("dm_a2", "AgentHansa", "ripped_off", "MachineLearning",
+        ("dm_a2", "reddit", "AgentHansa", "ripped_off", "MachineLearning",
          "Listed my agent on AgentHansa, got assigned a quest, completed it — and the customer disputed the payout 2 weeks later. No appeal. Out $400."),
-        # BotLearn — engage, ignore
-        ("dm_b1", "BotLearn", "ml_lurker", "MachineLearning",
+        ("dm_b1", "reddit", "BotLearn", "ml_lurker", "MachineLearning",
          "My agent keeps hallucinating SQL joins. Is there a 'teach your agent SQL' course anywhere? Saw something called BotLearn."),
-        ("dm_b2", "BotLearn", "random_dad", "all",
+        ("dm_b2", "reddit", "BotLearn", "random_dad", "all",
          "My kid wants to learn Python, any decent free courses? Heard of BotLearn but isn't that for AI agents?"),
+
+        # ── X / Twitter ──────────────────────────────────────────
+        ("dm_x1", "x", "FluxA", "0xagentdev", "#agentpayments",
+         "wired @FluxA into our autonomous research agent over the weekend. agent quotes, pays, and gets a receipt — all sub-second on Base. this is the missing piece for actual agent commerce 🔥"),
+        ("dm_x2", "x", "TokenRouter", "ml_anna", "#llmops",
+         "anthropic 503'd for 12 min during our prod incident triage. @TokenRouter auto-failed over to gpt-4o, never paged. honestly worth the routing markup just for the sleep"),
+        ("dm_x3", "x", "TokenRouter", "outage_watch", "TLDs:llm-status",
+         "🚨 @TokenRouter dashboard down for 30+ min. requests still routing but no usage visibility. nothing on their status page. 2nd time this month."),
+        ("dm_x4", "x", "AgentHansa", "buildersbuild", "#agents",
+         "@AgentHansa just paid out my first quest in USDC 6 minutes after the customer marked it complete. no invoice, no NET-30, no chase. this is the future of micro-B2B 👀"),
+        ("dm_x5", "x", "FluxA", "crypto_curious", "everyone",
+         "what is fluxa even, saw the logo at a hackathon booth"),
+        ("dm_x6", "x", "BotLearn", "agent_phd", "#agentskills",
+         "@BotLearn SQL skill course is genuinely the best 2 hrs i've spent on agent training. eval is real — my agent passed and now actually writes valid joins against postgres"),
+
+        # ── Instagram ────────────────────────────────────────────
+        ("dm_i1", "instagram", "FluxA", "indiehacker_julia", "@fluxa.payments",
+         "love this. quick q — does the AgentCard work for non-USD merchants too or USDC-settle-only? building for an EU customer 🇪🇺"),
+        ("dm_i2", "instagram", "AgentHansa", "agentstartups", "@agenthansa",
+         "🔥🔥 just listed our pricing-research agent. got pinged for a quest in <1 hr. wild"),
+        ("dm_i3", "instagram", "TokenRouter", "angry_buyer_88", "@tokenrouter.ai",
+         "your latest billing cycle has me being charged for calls I never made. dm'd 3 days ago, no response. fix this or i'm posting receipts 😤"),
+        ("dm_i4", "instagram", "BotLearn", "study_grammer", "@botlearn",
+         "is this for like real bots or for kids learning to code? 🤔"),
+        ("dm_i5", "instagram", "FluxA", "vibe_artist_22", "@fluxa.payments",
+         "the brand colors are kinda fire ngl"),
     ]
+    def _url(source, mid, channel, brand):
+        if source == "x":
+            return f"https://x.com/{channel.lstrip('#')}/status/{mid}"
+        if source == "instagram":
+            return f"https://instagram.com/p/{mid}"
+        return f"https://reddit.com/r/{channel}/comments/{mid}"
+
     out = [
         Mention(
-            id=mid, source="reddit", brand=brand, author=author,
-            text=text, url=f"https://reddit.com/r/{sub}/comments/{mid}",
-            posted_at=now, subreddit=sub,
+            id=mid, source=source, brand=brand, author=author,
+            text=text, url=_url(source, mid, channel, brand),
+            posted_at=now, subreddit=channel,
         )
-        for mid, brand, author, sub, text in raw
+        for mid, source, brand, author, channel, text in raw
     ]
     if active_brands:
         active = set(active_brands)
@@ -545,6 +597,7 @@ ss.setdefault("rejected", set())
 ss.setdefault("approved", set())
 ss.setdefault("toast_queue", [])
 ss.setdefault("slack_sent", set())
+ss.setdefault("brand_filter", None)  # None = show all brands; otherwise brand name
 
 # ────────────────────────────────────────────────────────────────────────────
 # Sidebar
@@ -651,51 +704,73 @@ def _brand_counts() -> dict[str, int]:
 
 per_brand_counts = _brand_counts()
 
-brand_tiles_html = ""
-for name in active_brands:
+# Filter status line + "Show all" clear button
+filter_cols = st.columns([6, 1])
+with filter_cols[0]:
+    if ss.brand_filter:
+        ctx = load_brand_context(ss.brand_filter)
+        color = ctx.get("accent_color", ACCENT)
+        emoji = ctx.get("emoji", "●")
+        st.markdown(
+            f"<div style='font-size:0.85rem;color:{MUTED};margin-top:0.5rem'>"
+            f"Filtered to <span style='color:{color};font-weight:700'>{emoji} {ss.brand_filter}</span> · "
+            f"click another tile to switch · click '✕ All brands' to clear</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            f"<div style='font-size:0.85rem;color:{MUTED};margin-top:0.5rem'>"
+            f"Showing all <b>{len(active_brands)}</b> brand(s) · click a tile to filter</div>",
+            unsafe_allow_html=True,
+        )
+with filter_cols[1]:
+    if ss.brand_filter and st.button("✕ All brands", use_container_width=True, key="clear_brand_filter"):
+        ss.brand_filter = None
+        st.rerun()
+
+# One clickable tile per active brand
+tile_cols = st.columns(len(active_brands))
+for col, name in zip(tile_cols, active_brands):
     ctx = load_brand_context(name)
     color = ctx.get("accent_color", ACCENT)
     emoji = ctx.get("emoji", "●")
     count = per_brand_counts.get(name, 0)
-    brand_tiles_html += f"""
-    <div style="
-        flex:1; min-width:220px;
-        background: linear-gradient(135deg, {color}22 0%, {color}05 100%);
-        border: 1px solid {color}66;
-        border-radius: 12px; padding: 0.85rem 1rem;
-        display:flex; align-items:center; gap:0.7rem;
-    ">
-        <span class="pulse-dot" style="background:{color};
-            box-shadow: 0 0 0 0 {color}b0; animation: pulse 1.4s infinite;"></span>
-        <div style="flex:1; min-width:0;">
-            <div style="font-weight:700; color:#fff; font-size:1.05rem;">{emoji} {name}</div>
-            <div style="color:{MUTED}; font-size:0.72rem; line-height:1.25;">
-                {ctx['one_liner'][:80]}{'…' if len(ctx['one_liner']) > 80 else ''}
-            </div>
-        </div>
-        <div style="text-align:right;">
-            <div style="font-size:1.3rem;font-weight:700;color:{color};font-family:monospace;line-height:1">{count}</div>
-            <div style="color:{MUTED};font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;">mentions</div>
-        </div>
-    </div>
-    """
+    is_active = ss.brand_filter == name
+    # Per-tile color override + "active" state ring
+    active_cls = " active" if is_active else ""
+    with col:
+        st.markdown(
+            f"<div class='brand-tile-btn{active_cls}' style='color:{color}'>",
+            unsafe_allow_html=True,
+        )
+        label = f"{emoji} {name}\n{count} mentions"
+        if st.button(label, key=f"tile_{name}", use_container_width=True):
+            ss.brand_filter = None if is_active else name
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.caption(ctx["one_liner"][:70] + ("…" if len(ctx["one_liner"]) > 70 else ""))
 
-st.markdown(
-    f"""
-    <div style="display:flex; flex-wrap:wrap; gap:0.7rem; margin: 1.2rem 0;">
-        {brand_tiles_html}
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+# ────────────────────────────────────────────────────────────────────────────
+# Filtered view of results (drives metrics + 3-column dashboard)
+# ────────────────────────────────────────────────────────────────────────────
+# If user removes the currently-filtered brand from active set, clear the filter
+if ss.brand_filter and ss.brand_filter not in active_brands:
+    ss.brand_filter = None
+
+def _filtered_results():
+    if ss.brand_filter:
+        return [r for r in ss.results if r[0].brand == ss.brand_filter]
+    return list(ss.results)
+
+filtered = _filtered_results()
 
 # ────────────────────────────────────────────────────────────────────────────
 # Metrics
 # ────────────────────────────────────────────────────────────────────────────
-buckets = [d.bucket for _, d, _ in ss.results]
+buckets = [d.bucket for _, d, _ in filtered]
 n_engage    = buckets.count("ENGAGE")
 n_escalate  = buckets.count("ESCALATE")
-n_today     = len(ss.results)
+n_today     = len(filtered)
 spend_today = cost_today()
 
 mc1, mc2, mc3, mc4 = st.columns(4)
@@ -744,7 +819,8 @@ if run_clicked:
         prog = st.progress(0.0, text="Triaging…")
         results: list[tuple[Mention, Decision, Draft | None]] = []
         for i, m in enumerate(mentions, 1):
-            prog.progress(i / max(len(mentions), 1), text=f"Triaging {i}/{len(mentions)} · r/{m.subreddit}")
+            src_label = {"x": f"𝕏 {m.subreddit}", "instagram": f"IG {m.subreddit}"}.get(m.source, f"r/{m.subreddit}")
+            prog.progress(i / max(len(mentions), 1), text=f"Triaging {i}/{len(mentions)} · {src_label}")
             d = triage_mention(m)
             draft = None
             if d.bucket == "ENGAGE":
@@ -765,6 +841,17 @@ def pill(text: str, kind: str) -> str:
 def signal_pill(text: str) -> str:
     return f'<span class="pill pill-signal">{text}</span>'
 
+def _source_meta(m: Mention) -> str:
+    """Source-aware meta string: 'r/foo · u/bar', '𝕏 #tag · @bar', '📷 IG @owner · @bar'."""
+    if m.source == "x":
+        chan = m.subreddit
+        chan_disp = chan if chan.startswith(("#", "@", "TLDs:")) else f"#{chan}"
+        return f'<span style="color:#1d9bf0;font-weight:700">𝕏</span> {chan_disp} · @{m.author}'
+    if m.source == "instagram":
+        return f'<span style="color:#e1306c;font-weight:700">📷 IG</span> {m.subreddit} · @{m.author}'
+    return f"r/{m.subreddit} · u/{m.author}"
+
+
 def render_card(m: Mention, d: Decision, css_class: str) -> str:
     ctx = load_brand_context(m.brand)
     brand_color = ctx.get("accent_color", ACCENT)
@@ -773,9 +860,10 @@ def render_card(m: Mention, d: Decision, css_class: str) -> str:
         f'<span class="pill" style="background:{brand_color}1f;color:{brand_color};'
         f'border:1px solid {brand_color}55">{brand_emoji} {m.brand}</span>'
     )
+    source_html = _source_meta(m)
     return (
         f'<div class="mention-card {css_class}">'
-        f'<div class="mention-meta">r/{m.subreddit} · u/{m.author} · {m.posted_at.strftime("%H:%M:%SZ")}</div>'
+        f'<div class="mention-meta">{source_html} · {m.posted_at.strftime("%H:%M:%SZ")}</div>'
         f'<div class="mention-text">{m.text[:280]}{"…" if len(m.text) > 280 else ""}</div>'
         f'<div style="margin-top:0.6rem">{brand_tag}{pill(d.urgency, d.urgency)}{signal_pill(d.signal_type)}</div>'
         f'<div class="mention-reasoning">{d.reasoning}</div>'
@@ -786,7 +874,7 @@ c_esc, c_eng, c_mon = st.columns(3, gap="medium")
 
 with c_esc:
     st.markdown('<div class="col-header escalate">⚠️ Escalations</div>', unsafe_allow_html=True)
-    items = [(m, d) for m, d, _ in ss.results if d.bucket == "ESCALATE"]
+    items = [(m, d) for m, d, _ in filtered if d.bucket == "ESCALATE"]
     if not items:
         st.caption("No escalations. All quiet.")
     for m, d in items:
@@ -809,7 +897,7 @@ with c_esc:
 
 with c_eng:
     st.markdown('<div class="col-header engage">✨ Engage Queue</div>', unsafe_allow_html=True)
-    items = [(m, d, dr) for m, d, dr in ss.results if d.bucket == "ENGAGE"]
+    items = [(m, d, dr) for m, d, dr in filtered if d.bucket == "ENGAGE"]
     if not items:
         st.caption("No engage opportunities yet. Hit RUN PULSE.")
     for m, d, draft in items:
@@ -857,7 +945,7 @@ with c_eng:
 
 with c_mon:
     st.markdown('<div class="col-header">👁 Monitored (Ignored)</div>', unsafe_allow_html=True)
-    items = [(m, d) for m, d, _ in ss.results if d.bucket == "IGNORE"]
+    items = [(m, d) for m, d, _ in filtered if d.bucket == "IGNORE"]
     if not items:
         st.caption("No ignored items.")
     for m, d in items:
