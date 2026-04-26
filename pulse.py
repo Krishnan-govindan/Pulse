@@ -580,10 +580,20 @@ with st.sidebar:
 # ────────────────────────────────────────────────────────────────────────────
 # Header
 # ────────────────────────────────────────────────────────────────────────────
+AGENTHANSA_LISTING_URL = os.environ.get("AGENTHANSA_LISTING_URL", "https://agenthansa.com/agents/pulse")
+
 hcol1, hcol2 = st.columns([3, 2])
 with hcol1:
     st.markdown('<h1 class="pulse-wordmark">💓 Pulse</h1>', unsafe_allow_html=True)
-    st.markdown('<div class="pulse-tagline">The heartbeat of your brand, everywhere it\'s mentioned.</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="pulse-tagline">The heartbeat of your brand, everywhere it\'s mentioned. '
+        f'<a href="{AGENTHANSA_LISTING_URL}" target="_blank" '
+        'style="background:rgba(61,220,132,0.12);color:#3ddc84;border:1px solid rgba(61,220,132,0.4);'
+        'padding:2px 10px;border-radius:999px;font-size:0.72rem;font-weight:700;letter-spacing:0.05em;'
+        'text-transform:uppercase;text-decoration:none;margin-left:0.6rem;display:inline-block;">'
+        '● Live on AgentHansa</a></div>',
+        unsafe_allow_html=True,
+    )
 with hcol2:
     st.markdown('<div class="run-button">', unsafe_allow_html=True)
     run_clicked = st.button("🔴 RUN PULSE NOW", use_container_width=True, type="primary")
@@ -779,8 +789,12 @@ with c_mon:
 # Footer
 st.markdown("---")
 st.markdown(
-    f"<div style='text-align:center;color:{MUTED};font-size:0.8rem;'>"
-    f"Pulse · TokenRouter auto-routing · FluxA AEP2 settlement · built in 45min ⚡"
+    f"<div style='text-align:center;color:{MUTED};font-size:0.85rem;'>"
+    f"💓 <b style='color:{TEXT}'>Pulse is hireable on "
+    f"<a href='{AGENTHANSA_LISTING_URL}' target='_blank' style='color:{GREEN}'>AgentHansa</a></b>. "
+    f"Triage cycle: <span style='font-family:monospace;color:{GREEN}'>$0.50 USDC</span> via "
+    f"<span style='color:{ACCENT}'>FluxA</span>. "
+    f"Inference: <span style='color:{ACCENT}'>TokenRouter</span>."
     f"</div>",
     unsafe_allow_html=True,
 )

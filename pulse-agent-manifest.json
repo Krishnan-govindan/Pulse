@@ -1,0 +1,249 @@
+{
+    "schema_version": "1.0",
+    "name": "Pulse",
+    "tagline": "The heartbeat of your brand, everywhere it's mentioned.",
+    "description": "Pulse is a real-time brand monitoring agent. Give it your brand keywords; it watches Reddit (and soon X/HN), triages every mention into ESCALATE / ENGAGE / IGNORE with reasoning, and drafts on-brand reply text for engage opportunities. Built for builder-first companies that don't have time to babysit social.",
+    "category": "brand-monitoring",
+    "tags": [
+        "brand-monitoring",
+        "social-listening",
+        "reddit",
+        "triage",
+        "drafting"
+    ],
+    "owner": {
+        "name": "PaleBlueDot",
+        "contact": "fulsuccess.ai@gmail.com"
+    },
+    "pricing": {
+        "model": "per-task",
+        "amount": 0.5,
+        "currency": "USDC",
+        "settlement": {
+            "rail": "FluxA AEP2",
+            "chain": "Base",
+            "wallet_handle": "pulse.fluxa"
+        },
+        "description": "$0.50 USDC per triage cycle (up to 30 mentions). Paid via FluxA AEP2."
+    },
+    "endpoints": {
+        "triage": {
+            "method": "POST",
+            "url": "http://localhost:8001/pulse/triage",
+            "input_schema": {
+                "properties": {
+                    "brand_keywords": {
+                        "examples": [
+                            [
+                                "FluxA",
+                                "agent wallet"
+                            ]
+                        ],
+                        "items": {
+                            "type": "string"
+                        },
+                        "minItems": 1,
+                        "title": "Brand Keywords",
+                        "type": "array"
+                    },
+                    "sources": {
+                        "default": [
+                            "reddit"
+                        ],
+                        "description": "Currently only 'reddit' supported.",
+                        "items": {
+                            "type": "string"
+                        },
+                        "title": "Sources",
+                        "type": "array"
+                    },
+                    "max_mentions": {
+                        "default": 30,
+                        "maximum": 100,
+                        "minimum": 1,
+                        "title": "Max Mentions",
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "brand_keywords"
+                ],
+                "title": "TriageRequest",
+                "type": "object"
+            },
+            "output_schema": {
+                "$defs": {
+                    "MentionOut": {
+                        "properties": {
+                            "id": {
+                                "title": "Id",
+                                "type": "string"
+                            },
+                            "subreddit": {
+                                "title": "Subreddit",
+                                "type": "string"
+                            },
+                            "author": {
+                                "title": "Author",
+                                "type": "string"
+                            },
+                            "text": {
+                                "title": "Text",
+                                "type": "string"
+                            },
+                            "url": {
+                                "title": "Url",
+                                "type": "string"
+                            },
+                            "posted_at": {
+                                "title": "Posted At",
+                                "type": "string"
+                            },
+                            "bucket": {
+                                "title": "Bucket",
+                                "type": "string"
+                            },
+                            "urgency": {
+                                "title": "Urgency",
+                                "type": "string"
+                            },
+                            "signal_type": {
+                                "title": "Signal Type",
+                                "type": "string"
+                            },
+                            "confidence": {
+                                "title": "Confidence",
+                                "type": "number"
+                            },
+                            "reasoning": {
+                                "title": "Reasoning",
+                                "type": "string"
+                            },
+                            "draft_text": {
+                                "anyOf": [
+                                    {
+                                        "type": "string"
+                                    },
+                                    {
+                                        "type": "null"
+                                    }
+                                ],
+                                "default": null,
+                                "title": "Draft Text"
+                            },
+                            "voice_anchors": {
+                                "default": [],
+                                "items": {
+                                    "type": "string"
+                                },
+                                "title": "Voice Anchors",
+                                "type": "array"
+                            }
+                        },
+                        "required": [
+                            "id",
+                            "subreddit",
+                            "author",
+                            "text",
+                            "url",
+                            "posted_at",
+                            "bucket",
+                            "urgency",
+                            "signal_type",
+                            "confidence",
+                            "reasoning"
+                        ],
+                        "title": "MentionOut",
+                        "type": "object"
+                    }
+                },
+                "properties": {
+                    "escalations": {
+                        "items": {
+                            "$ref": "#/$defs/MentionOut"
+                        },
+                        "title": "Escalations",
+                        "type": "array"
+                    },
+                    "engage_opportunities": {
+                        "items": {
+                            "$ref": "#/$defs/MentionOut"
+                        },
+                        "title": "Engage Opportunities",
+                        "type": "array"
+                    },
+                    "monitored": {
+                        "items": {
+                            "$ref": "#/$defs/MentionOut"
+                        },
+                        "title": "Monitored",
+                        "type": "array"
+                    },
+                    "cycle_cost_usd": {
+                        "title": "Cycle Cost Usd",
+                        "type": "number"
+                    },
+                    "settlement": {
+                        "additionalProperties": true,
+                        "title": "Settlement",
+                        "type": "object"
+                    }
+                },
+                "required": [
+                    "escalations",
+                    "engage_opportunities",
+                    "monitored",
+                    "cycle_cost_usd",
+                    "settlement"
+                ],
+                "title": "TriageResponse",
+                "type": "object"
+            }
+        },
+        "manifest": {
+            "method": "GET",
+            "url": "http://localhost:8001/pulse/manifest"
+        },
+        "health": {
+            "method": "GET",
+            "url": "http://localhost:8001/healthz"
+        }
+    },
+    "sample_inputs": [
+        {
+            "brand_keywords": [
+                "FluxA",
+                "agent wallet",
+                "AEP2"
+            ],
+            "sources": [
+                "reddit"
+            ],
+            "max_mentions": 30
+        },
+        {
+            "brand_keywords": [
+                "Acme Robotics"
+            ],
+            "sources": [
+                "reddit"
+            ],
+            "max_mentions": 15
+        }
+    ],
+    "sample_task": "Monitor Reddit for mentions of {brand} for 24 hours and surface escalations + engagement opportunities, with on-brand draft replies.",
+    "infrastructure": {
+        "inference": "TokenRouter",
+        "models": [
+            "anthropic/claude-sonnet-4.6 (triage)",
+            "anthropic/claude-opus-4.7 (drafting)"
+        ],
+        "settlement": "FluxA AEP2",
+        "storage": "SQLite (per-tenant)"
+    },
+    "ui": {
+        "demo_url": "http://localhost:8501",
+        "logo_emoji": "\ud83d\udc93",
+        "accent_color": "#ff2d4a"
+    }
+}
