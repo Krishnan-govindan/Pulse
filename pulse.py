@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from core.brand_context import load_brand_context
+
 load_dotenv()
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -188,6 +190,10 @@ class Draft(BaseModel):
     draft_text: str
     rationale: str
     risk_flags: list[str] = []
+    voice_anchors: list[str] = Field(
+        default_factory=list,
+        description="1-2 voice_samples or preferred_phrases from brand context this draft drew from.",
+    )
 
 # ────────────────────────────────────────────────────────────────────────────
 # Storage
@@ -331,20 +337,54 @@ def triage_mention(m: Mention) -> Decision:
 # ────────────────────────────────────────────────────────────────────────────
 # Drafter
 # ────────────────────────────────────────────────────────────────────────────
-DRAFT_SYSTEM = (
-    "You draft a Reddit reply for FluxA — agent payment infrastructure. "
-    "Helpful first, promotional last. Match Reddit's culture, conversational, 1-3 sentences max. "
-    "Never invent product facts. "
-    'Return JSON: {"draft_text": "...", "rationale": "...", "risk_flags": ["..."]}.'
-)
+def _build_draft_system(ctx: dict) -> str:
+    products = "\n".join(f"  - {p}" for p in ctx["key_products"])
+    partners = "\n".join(f"  - {k}: {v}" for k, v in ctx["ecosystem_partners"].items())
+    voice = "\n".join(f'  - "{s}"' for s in ctx["voice_samples"])
+    banned = ", ".join(ctx["banned_phrases"])
+    preferred = ", ".join(ctx["preferred_phrases"])
+    never = "\n".join(f"  - {n}" for n in ctx["what_to_never_claim"])
+    return f"""You draft a Reddit reply for {ctx['name']}. Below is {ctx['name']}'s brand context, ecosystem position, voice samples, and rules. Use this context to draft a reply that sounds authentically like {ctx['name']} — short, technical, builder-focused, no corporate-speak.
+
+ONE-LINER: {ctx['one_liner']}
+
+KEY PRODUCTS:
+{products}
+
+ECOSYSTEM PARTNERS:
+{partners}
+
+TONE: {ctx['tone']}
+
+VOICE SAMPLES (mimic this cadence):
+{voice}
+
+PREFERRED PHRASES: {preferred}
+BANNED PHRASES (never use): {banned}
+
+NEVER CLAIM:
+{never}
+
+Rules:
+- Helpful first, promotional last. Mention {ctx['name']} only if it genuinely solves the person's problem.
+- 1-3 sentences max. Reddit voice — conversational, not formal.
+- If the question touches on inference / LLM / model routing, you may mention that {ctx['name']} agents commonly use TokenRouter as their LLM layer (since they're ecosystem partners). Don't oversell it.
+- Never invent product facts. Use only what's in the brand context above.
+- In rationale, cite 1-2 voice_samples or preferred_phrases you anchored on, verbatim.
+- Populate voice_anchors with those same 1-2 quoted strings.
+
+Return JSON: {{"draft_text": "...", "rationale": "...", "risk_flags": ["..."], "voice_anchors": ["...", "..."]}}"""
+
 
 def draft_response(m: Mention, d: Decision) -> Draft:
+    ctx = load_brand_context(m.brand)
+    system = _build_draft_system(ctx)
     user = (
         f"Subreddit: r/{m.subreddit}\nAuthor: u/{m.author}\n"
         f"Mention: {m.text}\n\nTriage: {d.bucket} ({d.signal_type}, {d.urgency})\n"
         f"Reasoning: {d.reasoning}\n\nDraft a Reddit reply."
     )
-    text, _ = _completion(DRAFT_MODEL, DRAFT_SYSTEM, user, kind="draft", max_tokens=300)
+    text, _ = _completion(DRAFT_MODEL, system, user, kind="draft", max_tokens=400)
     try:
         return Draft(**_parse_json(text))
     except Exception:
@@ -352,6 +392,7 @@ def draft_response(m: Mention, d: Decision) -> Draft:
             draft_text=text.strip()[:400],
             rationale="raw model output (json parse failed)",
             risk_flags=["unparsed_output"],
+            voice_anchors=[],
         )
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -694,6 +735,21 @@ with c_eng:
             height=110, label_visibility="collapsed",
         )
         ss.draft_edits[m.id] = edited
+        if draft:
+            with st.expander("🎨 Brand voice applied"):
+                if draft.voice_anchors:
+                    st.markdown("**Anchored on:**")
+                    for v in draft.voice_anchors:
+                        st.markdown(f"> _{v}_")
+                else:
+                    st.caption("No explicit anchors returned by drafter.")
+                st.markdown(f"**Rationale:** {draft.rationale}")
+                ctx = load_brand_context(m.brand)
+                st.caption(
+                    f"Voice library: {len(ctx['voice_samples'])} samples · "
+                    f"{len(ctx['preferred_phrases'])} preferred phrases · "
+                    f"{len(ctx['banned_phrases'])} banned"
+                )
         if draft and draft.risk_flags:
             st.caption(f"⚠️ risk: {', '.join(draft.risk_flags)}")
         b1, b2, b3 = st.columns(3)
