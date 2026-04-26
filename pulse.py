@@ -16,15 +16,14 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from core.brand_context import load_brand_context
+from core.brand_context import all_brands, brand_names, load_brand_context
 
 load_dotenv()
 
 # ────────────────────────────────────────────────────────────────────────────
 # Config
 # ────────────────────────────────────────────────────────────────────────────
-BRAND = "FluxA"
-BRAND_KEYWORDS = ["FluxA", "agent wallet", "MCP monetization", "AEP2", "agent payments"]
+DEFAULT_BRAND = "FluxA"  # used as fallback if no brand selected
 SUBREDDITS = ["all", "SaaS", "MachineLearning", "LocalLLaMA", "startups"]
 DB_PATH = Path(__file__).parent / "pulse.db"
 
@@ -296,34 +295,41 @@ def _parse_json(text: str) -> dict:
 # ────────────────────────────────────────────────────────────────────────────
 # Triage
 # ────────────────────────────────────────────────────────────────────────────
-TRIAGE_SYSTEM = """You are Pulse, a triage agent for B2B brand monitoring. You see a public mention of FluxA (an AI agent payment platform — agent wallets, USDC settlement, MCP server monetization, AEP2 protocol). Decide:
+def _build_triage_system(ctx: dict) -> str:
+    name = ctx["name"]
+    one_liner = ctx["one_liner"]
+    products = "; ".join(ctx["key_products"][:3])
+    return f"""You are Pulse, a triage agent for B2B brand monitoring. You see a public mention possibly related to {name} ({one_liner}). Key products: {products}. Decide:
 
-- IGNORE: unrelated to FluxA the company (e.g., flux capacitor, flux core welding, different "FluxA"), spam, or already-resolved.
-- ENGAGE: clear authentic opportunity — someone asking about agent payments / USDC / MCP monetization, comparing to FluxA, or expressing pain FluxA solves.
-- ESCALATE: complaint, accusation, bug report, viral negative, or any PR risk.
+- IGNORE: unrelated to {name} the company, spam, or already-resolved. Watch for false positives — generic words that match the brand keyword but mean something else.
+- ENGAGE: clear authentic opportunity — someone asking about {name}'s problem space, comparing to {name}, or expressing pain {name} solves.
+- ESCALATE: complaint, accusation, bug report, viral negative, or any PR risk against {name}.
 
 Conservative: prefer ESCALATE over ENGAGE when uncertain. Prefer IGNORE over ENGAGE for noise.
 
-Return strict JSON: {"bucket": "...", "confidence": 0.0-1.0, "reasoning": "1-2 sentences", "urgency": "LOW|MED|HIGH", "signal_type": "positive_review|customer_question|competitor_mention|pain_point|complaint|bug_report|news|irrelevant"}
+Return strict JSON: {{"bucket": "...", "confidence": 0.0-1.0, "reasoning": "1-2 sentences", "urgency": "LOW|MED|HIGH", "signal_type": "positive_review|customer_question|competitor_mention|pain_point|complaint|bug_report|news|irrelevant"}}
 
-Examples:
+Format examples (these use FluxA — apply the same logic to {name}):
 
-Mention: "Just spent 3 hours dialing in flux core welding settings on my Lincoln, what a pain. Anyone else?"
-Output: {"bucket":"IGNORE","confidence":0.98,"reasoning":"Welding terminology — 'flux core' is a wire type, no relation to FluxA.","urgency":"LOW","signal_type":"irrelevant"}
+Mention: "Just spent 3 hours dialing in flux core welding settings on my Lincoln, what a pain."
+Output: {{"bucket":"IGNORE","confidence":0.98,"reasoning":"Welding terminology — 'flux core' is a wire type, no relation to the brand.","urgency":"LOW","signal_type":"irrelevant"}}
 
-Mention: "Building an MCP server for code review, want to charge per call but Stripe metering is brutal. Is there anything purpose-built for monetizing MCP tools?"
-Output: {"bucket":"ENGAGE","confidence":0.93,"reasoning":"Direct ICP signal: builder asking about MCP monetization, the exact problem FluxA solves.","urgency":"MED","signal_type":"customer_question"}
+Mention: "Building an MCP server for code review, want to charge per call but Stripe metering is brutal. Anything purpose-built for monetizing MCP tools?"
+Output: {{"bucket":"ENGAGE","confidence":0.93,"reasoning":"Direct ICP signal: builder asking about the exact problem the brand solves.","urgency":"MED","signal_type":"customer_question"}}
 
-Mention: "@FluxA your USDC settlement just bricked our prod agent for 40 min and we lost $1.2k in payouts. Wallet 0x9f… ticket #2811 — radio silence for 6 hours. unacceptable."
-Output: {"bucket":"ESCALATE","confidence":0.99,"reasoning":"Public revenue-impacting outage complaint with ticket reference and silence — high PR + churn risk.","urgency":"HIGH","signal_type":"complaint"}
+Mention: "@FluxA your USDC settlement just bricked our prod agent for 40 min. Ticket #2811 — radio silence for 6 hours. unacceptable."
+Output: {{"bucket":"ESCALATE","confidence":0.99,"reasoning":"Public revenue-impacting outage complaint with silence — high PR + churn risk.","urgency":"HIGH","signal_type":"complaint"}}
 
 Mention: "saw a thing called FluxA somewhere, sounded interesting, idk what it does though"
-Output: {"bucket":"IGNORE","confidence":0.7,"reasoning":"Vague tangential mention with no actionable signal or question to engage with.","urgency":"LOW","signal_type":"irrelevant"}
+Output: {{"bucket":"IGNORE","confidence":0.7,"reasoning":"Vague tangential mention with no actionable signal.","urgency":"LOW","signal_type":"irrelevant"}}
 """
 
+
 def triage_mention(m: Mention) -> Decision:
-    user = f"Mention from r/{m.subreddit} by u/{m.author}:\n\n{m.text}"
-    text, _ = _completion(TRIAGE_MODEL, TRIAGE_SYSTEM, user, kind="triage", max_tokens=300)
+    ctx = load_brand_context(m.brand)
+    system = _build_triage_system(ctx)
+    user = f"Brand under monitoring: {m.brand}\nMention from r/{m.subreddit} by u/{m.author}:\n\n{m.text}"
+    text, _ = _completion(TRIAGE_MODEL, system, user, kind="triage", max_tokens=300)
     try:
         data = _parse_json(text)
         return Decision(**data)
@@ -401,9 +407,9 @@ def draft_response(m: Mention, d: Decision) -> Draft:
 def send_to_slack(m: Mention, d: Decision) -> tuple[bool, str]:
     webhook = os.environ.get("SLACK_WEBHOOK_URL", "").strip()
     payload = {
-        "text": f"🚨 Pulse Escalation · {BRAND} · r/{m.subreddit} ({d.urgency}/{d.signal_type})",
+        "text": f"🚨 Pulse Escalation · {m.brand} · r/{m.subreddit} ({d.urgency}/{d.signal_type})",
         "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": f"🚨 Pulse Escalation · {BRAND}"}},
+            {"type": "header", "text": {"type": "plain_text", "text": f"🚨 Pulse Escalation · {m.brand}"}},
             {"type": "section", "fields": [
                 {"type": "mrkdwn", "text": f"*Urgency*\n`{d.urgency}`"},
                 {"type": "mrkdwn", "text": f"*Signal*\n`{d.signal_type}`"},
@@ -439,7 +445,8 @@ def send_to_slack(m: Mention, d: Decision) -> tuple[bool, str]:
 # ────────────────────────────────────────────────────────────────────────────
 # Reddit ingest
 # ────────────────────────────────────────────────────────────────────────────
-def fetch_reddit_mentions(brand_keywords: list[str]) -> list[Mention]:
+def fetch_reddit_mentions(brand_keywords: list[str], brand_name: str = DEFAULT_BRAND) -> list[Mention]:
+    """Fetches Reddit mentions; tags each mention with the brand it matched."""
     import praw
     reddit = praw.Reddit(
         client_id=os.environ["REDDIT_CLIENT_ID"],
@@ -458,7 +465,7 @@ def fetch_reddit_mentions(brand_keywords: list[str]) -> list[Mention]:
                     seen.add(s.id)
                     body = s.selftext or s.title
                     out.append(Mention(
-                        id=s.id, source="reddit", brand=BRAND,
+                        id=s.id, source="reddit", brand=brand_name,
                         author=str(s.author) if s.author else "[deleted]",
                         text=f"{s.title}\n\n{body}".strip()[:1200],
                         url=f"https://reddit.com{s.permalink}",
@@ -470,36 +477,62 @@ def fetch_reddit_mentions(brand_keywords: list[str]) -> list[Mention]:
     out.sort(key=lambda x: x.posted_at, reverse=True)
     return out[:30]
 
+
+def fetch_reddit_mentions_multi(active_brands: list[str]) -> list[Mention]:
+    """Fan out across multiple brands using each brand's own search_keywords."""
+    out: list[Mention] = []
+    for name in active_brands:
+        ctx = load_brand_context(name)
+        out.extend(fetch_reddit_mentions(ctx.get("search_keywords", [name]), brand_name=name))
+    out.sort(key=lambda x: x.posted_at, reverse=True)
+    return out[:30]
+
 # ────────────────────────────────────────────────────────────────────────────
 # Demo mock data
 # ────────────────────────────────────────────────────────────────────────────
-def demo_mentions() -> list[Mention]:
+def demo_mentions(active_brands: list[str] | None = None) -> list[Mention]:
+    """Mock mentions across all four hackathon brands. Filtered to active_brands."""
     now = datetime.now(timezone.utc)
     raw = [
-        ("dm1", "saas_builder_22", "SaaS",
-         "Built an MCP server that does competitor scraping, want to charge $0.005/call. Stripe usage-based billing is overkill. Anything purpose-built for MCP tools?",
-         "engage"),
-        ("dm2", "agentdev_lin", "LocalLLaMA",
-         "Has anyone tried FluxA for paying out to agent wallets in USDC? Need something that doesn't require KYC for every $0.10 micro-transaction.",
-         "engage"),
-        ("dm3", "burned_user_91", "startups",
-         "@FluxA your AEP2 settlement bricked our prod for 25 min last night and we lost ~$800 in agent payouts. Ticket #4471 — ZERO response. This is the second time.",
-         "escalate"),
-        ("dm4", "shop_class_dad", "all",
-         "Picked up a flux core welder for the garage, anyone running 0.030 wire?",
-         "ignore"),
-        ("dm5", "vague_lurker", "all",
-         "saw FluxA on a thread somewhere, looked cool i guess",
-         "ignore"),
+        # FluxA — engage, engage, escalate, ignore
+        ("dm_f1", "FluxA", "saas_builder_22", "SaaS",
+         "Built an MCP server that does competitor scraping, want to charge $0.005/call. Stripe usage-based billing is overkill. Anything purpose-built for MCP tools?"),
+        ("dm_f2", "FluxA", "agentdev_lin", "LocalLLaMA",
+         "Has anyone tried FluxA for paying out to agent wallets in USDC? Need something that doesn't require KYC for every $0.10 micro-transaction."),
+        ("dm_f3", "FluxA", "burned_user_91", "startups",
+         "@FluxA your AEP2 settlement bricked our prod for 25 min last night and we lost ~$800 in agent payouts. Ticket #4471 — ZERO response."),
+        ("dm_f4", "FluxA", "shop_class_dad", "all",
+         "Picked up a flux core welder for the garage, anyone running 0.030 wire?"),
+        # TokenRouter — engage, engage, escalate
+        ("dm_t1", "TokenRouter", "infra_pat", "MachineLearning",
+         "Tired of writing my own model fallback layer when Anthropic 503s. Anyone using TokenRouter or OpenRouter for prod inference? Looking for p50/p99 numbers."),
+        ("dm_t2", "TokenRouter", "indie_lab", "LocalLLaMA",
+         "Is there a router that auto-picks gpt-4o-mini vs sonnet based on task difficulty? Don't want to write a classifier."),
+        ("dm_t3", "TokenRouter", "frustrated_dev", "SaaS",
+         "TokenRouter just billed me 3x what their dashboard showed for last week. Support hasn't replied in 4 days. Anyone else seeing this?"),
+        # AgentHansa — engage, escalate
+        ("dm_a1", "AgentHansa", "agent_builder_x", "startups",
+         "Built a B2B research agent. Where do people actually list these for real paid quests? Heard about AgentHansa, anyone using it?"),
+        ("dm_a2", "AgentHansa", "ripped_off", "MachineLearning",
+         "Listed my agent on AgentHansa, got assigned a quest, completed it — and the customer disputed the payout 2 weeks later. No appeal. Out $400."),
+        # BotLearn — engage, ignore
+        ("dm_b1", "BotLearn", "ml_lurker", "MachineLearning",
+         "My agent keeps hallucinating SQL joins. Is there a 'teach your agent SQL' course anywhere? Saw something called BotLearn."),
+        ("dm_b2", "BotLearn", "random_dad", "all",
+         "My kid wants to learn Python, any decent free courses? Heard of BotLearn but isn't that for AI agents?"),
     ]
-    return [
+    out = [
         Mention(
-            id=mid, source="reddit", brand=BRAND, author=author,
+            id=mid, source="reddit", brand=brand, author=author,
             text=text, url=f"https://reddit.com/r/{sub}/comments/{mid}",
             posted_at=now, subreddit=sub,
         )
-        for mid, author, sub, text, _ in raw
+        for mid, brand, author, sub, text in raw
     ]
+    if active_brands:
+        active = set(active_brands)
+        out = [m for m in out if m.brand in active]
+    return out
 
 # ────────────────────────────────────────────────────────────────────────────
 # Session state
@@ -518,7 +551,15 @@ ss.setdefault("slack_sent", set())
 # ────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Pulse Controls")
-    demo_mode = st.toggle("Demo Mode", value=True, help="Replay 5 hardcoded mentions instead of hitting Reddit live.")
+    demo_mode = st.toggle("Demo Mode", value=True, help="Replay hardcoded mentions instead of hitting Reddit live.")
+    active_brands = st.multiselect(
+        "Monitored brands",
+        options=brand_names(),
+        default=brand_names(),
+        help="Each brand uses its own keyword list, voice library, and accent color.",
+    )
+    if not active_brands:
+        active_brands = [DEFAULT_BRAND]
     slack_configured = bool(os.environ.get("SLACK_WEBHOOK_URL", "").strip())
     st.markdown(
         f"<div style='font-size:0.78rem;color:{MUTED};margin-top:0.4rem'>"
@@ -600,21 +641,49 @@ with hcol2:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────────────────────────────────
-# Brand banner
+# Brand banner — one tile per active brand, color-coded with its own pulsing dot
 # ────────────────────────────────────────────────────────────────────────────
-mention_count = len(ss.results)
+def _brand_counts() -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for m, _, _ in ss.results:
+        counts[m.brand] = counts.get(m.brand, 0) + 1
+    return counts
+
+per_brand_counts = _brand_counts()
+
+brand_tiles_html = ""
+for name in active_brands:
+    ctx = load_brand_context(name)
+    color = ctx.get("accent_color", ACCENT)
+    emoji = ctx.get("emoji", "●")
+    count = per_brand_counts.get(name, 0)
+    brand_tiles_html += f"""
+    <div style="
+        flex:1; min-width:220px;
+        background: linear-gradient(135deg, {color}22 0%, {color}05 100%);
+        border: 1px solid {color}66;
+        border-radius: 12px; padding: 0.85rem 1rem;
+        display:flex; align-items:center; gap:0.7rem;
+    ">
+        <span class="pulse-dot" style="background:{color};
+            box-shadow: 0 0 0 0 {color}b0; animation: pulse 1.4s infinite;"></span>
+        <div style="flex:1; min-width:0;">
+            <div style="font-weight:700; color:#fff; font-size:1.05rem;">{emoji} {name}</div>
+            <div style="color:{MUTED}; font-size:0.72rem; line-height:1.25;">
+                {ctx['one_liner'][:80]}{'…' if len(ctx['one_liner']) > 80 else ''}
+            </div>
+        </div>
+        <div style="text-align:right;">
+            <div style="font-size:1.3rem;font-weight:700;color:{color};font-family:monospace;line-height:1">{count}</div>
+            <div style="color:{MUTED};font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;">mentions</div>
+        </div>
+    </div>
+    """
+
 st.markdown(
     f"""
-    <div class="brand-banner">
-        <span class="pulse-dot"></span>
-        <div>
-            <div class="brand-name">{BRAND}</div>
-            <div class="brand-meta">Tracking: {", ".join(BRAND_KEYWORDS)} · across {len(SUBREDDITS)} subreddits</div>
-        </div>
-        <div style="margin-left:auto; text-align:right;">
-            <div class="brand-meta">Live mentions</div>
-            <div style="font-size:1.8rem;font-weight:700;color:{ACCENT};font-family:monospace">{mention_count}</div>
-        </div>
+    <div style="display:flex; flex-wrap:wrap; gap:0.7rem; margin: 1.2rem 0;">
+        {brand_tiles_html}
     </div>
     """,
     unsafe_allow_html=True,
@@ -659,17 +728,18 @@ if run_clicked:
     ss.rejected = set()
 
     with st.status("🔴 Pulse is live — fetching, triaging, drafting…", expanded=True) as status:
+        st.write(f"🎯 Brands: {', '.join(active_brands)}")
         if demo_mode:
-            st.write("🎬 Demo mode: replaying 5 mentions")
-            mentions = demo_mentions()
+            st.write(f"🎬 Demo mode: replaying mentions for {len(active_brands)} brand(s)")
+            mentions = demo_mentions(active_brands=active_brands)
         else:
             st.write(f"📡 Fetching from r/{', r/'.join(SUBREDDITS)}…")
             try:
-                mentions = fetch_reddit_mentions(BRAND_KEYWORDS)
-                st.write(f"✓ Fetched {len(mentions)} unique mentions")
+                mentions = fetch_reddit_mentions_multi(active_brands)
+                st.write(f"✓ Fetched {len(mentions)} unique mentions across {len(active_brands)} brand(s)")
             except Exception as e:
                 st.error(f"Reddit fetch failed: {e}. Falling back to demo.")
-                mentions = demo_mentions()
+                mentions = demo_mentions(active_brands=active_brands)
 
         prog = st.progress(0.0, text="Triaging…")
         results: list[tuple[Mention, Decision, Draft | None]] = []
@@ -696,11 +766,18 @@ def signal_pill(text: str) -> str:
     return f'<span class="pill pill-signal">{text}</span>'
 
 def render_card(m: Mention, d: Decision, css_class: str) -> str:
+    ctx = load_brand_context(m.brand)
+    brand_color = ctx.get("accent_color", ACCENT)
+    brand_emoji = ctx.get("emoji", "●")
+    brand_tag = (
+        f'<span class="pill" style="background:{brand_color}1f;color:{brand_color};'
+        f'border:1px solid {brand_color}55">{brand_emoji} {m.brand}</span>'
+    )
     return (
         f'<div class="mention-card {css_class}">'
         f'<div class="mention-meta">r/{m.subreddit} · u/{m.author} · {m.posted_at.strftime("%H:%M:%SZ")}</div>'
         f'<div class="mention-text">{m.text[:280]}{"…" if len(m.text) > 280 else ""}</div>'
-        f'<div style="margin-top:0.6rem">{pill(d.urgency, d.urgency)}{signal_pill(d.signal_type)}</div>'
+        f'<div style="margin-top:0.6rem">{brand_tag}{pill(d.urgency, d.urgency)}{signal_pill(d.signal_type)}</div>'
         f'<div class="mention-reasoning">{d.reasoning}</div>'
         f'</div>'
     )
